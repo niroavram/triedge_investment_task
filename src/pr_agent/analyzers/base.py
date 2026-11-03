@@ -66,3 +66,9 @@ def stage_config(workdir: Path, source: Path, name: str) -> str:
 def unstage_configs(workdir: Path) -> None:
     """Remove the staged configs so they never leak into later scans, tests or patches."""
     shutil.rmtree(workdir / CONFIG_DIR, ignore_errors=True)
+
+
+def tool_cmd(sandbox: Sandbox, module: str) -> list[str]:
+    """`python -P -m <tool>`: -P keeps the cwd (the PR checkout) off sys.path, so a PR that
+    adds `ruff.py` or `bandit/__main__.py` cannot run code in place of the real tool."""
+    return [*sandbox.python(), "-P", "-m", module]

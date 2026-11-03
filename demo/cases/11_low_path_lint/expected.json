@@ -8,6 +8,15 @@
       "keywords": [
         "unused"
       ]
+    },
+    {
+      "file": "scripts/report.py",
+      "category": "format",
+      "line": null,
+      "rule": "ruff:format",
+      "keywords": [
+        "format"
+      ]
     }
   ],
   "zero_findings": false,
@@ -22,5 +31,9 @@
   "fix_verified": true,
   "applied": true,
   "config_change_flagged": false,
-  "injection": false
+  "injection": false,
+  "resolved_in_round": {
+    "ruff:F401": 1,
+    "ruff:format": 2
+  }
 }

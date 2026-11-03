@@ -37,7 +37,11 @@ def merge_rounds(history: list[dict[str, Any]]) -> MergedView:
         _latest(decisions, record["decisions"], "finding_id")
         _latest(fixes, record["fixes"], "finding_id")
         _latest(checks, record["verifications"], "finding_id")
-        view.approved += [a for a in record["approved"] if a not in view.approved]
+        for f in record["findings"]:  # latest round that reported f decides its approval
+            if f.id in record["approved"] and f.id not in view.approved:
+                view.approved.append(f.id)
+            elif f.id not in record["approved"] and f.id in view.approved:
+                view.approved.remove(f.id)
         for fid in record["applied"]:
             view.resolved_in_round[fid] = record["round"]
             if fid not in view.applied:

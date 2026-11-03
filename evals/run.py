@@ -188,6 +188,12 @@ def render_results(rows: list[dict[str, Any]], mode: str, settings: Settings) ->
             if mode == "offline"
             else f" (review {settings.review_model}, fix {settings.fix_model})"
         ),
+        "- Convergence loop: "
+        + (
+            f"on (PR_AGENT_CONVERGE=1, max_rounds={settings.max_rounds})"
+            if settings.converge
+            else "off (PR_AGENT_CONVERGE=0, single round)"
+        ),
         f"- Cases: {s['cases']}",
         "",
         "## Summary",

@@ -1,0 +1,41 @@
+{
+  "findings": [
+    {
+      "file": "scripts/legacy_report.py",
+      "category": "lint",
+      "line": 8,
+      "rule": "ruff:UP045",
+      "keywords": [
+        "Optional",
+        "X | None"
+      ]
+    },
+    {
+      "file": "scripts/legacy_report.py",
+      "category": "lint",
+      "line": 3,
+      "rule": "ruff:F401",
+      "keywords": [
+        "unused"
+      ]
+    }
+  ],
+  "zero_findings": false,
+  "decisions": [
+    {
+      "file": "scripts/legacy_report.py",
+      "level": "auto",
+      "decided_by_contains": "scripts/**"
+    }
+  ],
+  "owners_tagged": [],
+  "fix_verified": true,
+  "applied": true,
+  "config_change_flagged": false,
+  "injection": false,
+  "resolved_in_round": {
+    "ruff:UP045": 1,
+    "ruff:F401": 2
+  },
+  "escalations_expected": 0
+}

@@ -23,6 +23,7 @@ from pr_agent.analyzers.base import (
     python_files,
     relative_path,
     stage_config,
+    tool_cmd,
     unstage_configs,
 )
 from pr_agent.gitutil import materialize
@@ -55,7 +56,7 @@ def _ruff(actx: AnalysisContext, subcommand: str, args: list[str]) -> ExecResult
     """Run `ruff <subcommand> <args>` in the workdir with the base config, then unstage it."""
     try:
         cfg = config_args(actx.workdir, actx.base_dir)
-        cmd = [*actx.sandbox.python(), "-m", "ruff", subcommand, "--no-cache", *cfg, *args]
+        cmd = [*tool_cmd(actx.sandbox, "ruff"), subcommand, "--no-cache", *cfg, *args]
         return actx.sandbox.run(cmd, actx.workdir)
     finally:
         unstage_configs(actx.workdir)

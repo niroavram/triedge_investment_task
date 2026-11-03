@@ -61,7 +61,19 @@ def test_parses_canned_json(tmp_path: Path) -> None:
     assert f.rule_id == "bandit:B105" and f.file == "src/a.py" and f.line == 7
     assert f.severity == "low" and f.confidence == 0.8
     assert sandbox.commands == [
-        ["python", "-m", "bandit", "-q", "-f", "json", "-s", "B101", "src/a.py"]
+        [
+            "python",
+            "-P",
+            "-m",
+            "bandit",
+            "-q",
+            "-f",
+            "json",
+            "-s",
+            "B101",
+            "--ignore-nosec",
+            "src/a.py",
+        ]
     ]  # the sandbox's interpreter, .py only
 
 

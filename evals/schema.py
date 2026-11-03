@@ -25,6 +25,7 @@ class ExpectedDecision(_Strict):
     file: str
     level: Literal["auto", "suggest", "comment", "forbidden"]
     decided_by_contains: str | None = None
+    rule: str | None = None  # only decisions on findings with this rule (prefix match)
 
 
 class ExpectedCase(_Strict):
@@ -36,3 +37,6 @@ class ExpectedCase(_Strict):
     applied: bool = False
     config_change_flagged: bool = False
     injection: bool = False
+    resolved_in_round: dict[str, int] | None = None  # {"ruff:F401": 2}, keyed by rule prefix
+    escalations_expected: int | None = None
+    rule_proposal: bool | None = None  # a valid rule proposal is expected (or not)

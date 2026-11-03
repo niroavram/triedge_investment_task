@@ -47,6 +47,7 @@ def run_semgrep(actx: AnalysisContext) -> list[Finding]:
             executable(actx.sandbox, "semgrep"),
             "scan",
             "--metrics=off",
+            "--disable-nosem",  # a PR's `# nosemgrep` must not hide its own findings
             "--disable-version-check",
             "--json",
             *config_args(actx),

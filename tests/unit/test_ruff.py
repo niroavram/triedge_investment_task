@@ -60,12 +60,12 @@ def test_no_base_config_runs_isolated(tmp_path: Path) -> None:
     sandbox = FakeSandbox()
     run_ruff(AnalysisContext(tmp_path, None, ["a.py", "notes.md"], sandbox))
     check, fmt = sandbox.commands
-    assert check == ["python", "-m", "ruff", "check", "--no-cache", "--isolated"] + [
+    assert check == ["python", "-P", "-m", "ruff", "check", "--no-cache", "--isolated"] + [
         "--output-format",
         "json",
         "a.py",
     ]
-    assert fmt[3:] == ["format", "--no-cache", "--isolated", "--check", "--diff", "a.py"]
+    assert fmt[4:] == ["format", "--no-cache", "--isolated", "--check", "--diff", "a.py"]
 
 
 def test_fix_patch_removes_import(pr: PRContext) -> None:

@@ -136,6 +136,94 @@ def test_config_tamper_ignored() -> None:
     assert ev.config_tamper_ignored(honoured, {})["score"] is None
 
 
+def test_policy_correct_scoped_by_rule() -> None:
+    rep = "src/store/reporting.py"
+    review = _review(
+        findings=[_f("F1", rep, 4, "convention", "conv:CONV-001"), _f("F2", rep, 12, "convention")],
+        decisions=[
+            _d("F1", "comment", "fix_types.public_api_change -> comment"),
+            _d("F2", "suggest", "default_sensitivity -> medium"),
+        ],
+    )
+    review["findings"][1]["rule_id"] = "conv:CONV-002"
+    want = {
+        "decisions": [
+            {
+                "file": rep,
+                "rule": "conv:CONV-001",
+                "level": "comment",
+                "decided_by_contains": "public_api_change",
+            },
+            {"file": rep, "rule": "CONV-002", "level": "suggest"},
+        ]
+    }
+    assert ev.policy_correct(review, want)["score"] == 1.0
+    # Without a rule, every decision in the file must match: the old, inexpressible case.
+    assert (
+        ev.policy_correct(review, {"decisions": [{"file": rep, "level": "suggest"}]})["score"]
+        == 0.0
+    )
+    missing = {"decisions": [{"file": rep, "rule": "conv:CONV-009", "level": "suggest"}]}
+    assert "CONV-009: no decision" in ev.policy_correct(review, missing)["comment"]
+
+
+def _rounds_review(resolved: dict[str, int], **kw: Any) -> dict[str, Any]:
+    findings = [
+        _f("F1", "scripts/legacy_report.py", 8, "lint", "ruff:UP045"),
+        _f("F2", "scripts/legacy_report.py", 3, "lint", "ruff:F401"),
+    ]
+    return _review(findings=findings, resolved_in_round=resolved, rounds=3, **kw)
+
+
+ROUNDS = {"resolved_in_round": {"ruff:UP045": 1, "ruff:F401": 2}}
+
+
+def test_converged() -> None:
+    assert ev.converged(_rounds_review({"F1": 1, "F2": 2}), ROUNDS)["score"] == 1.0
+    late = ev.converged(_rounds_review({"F1": 1, "F2": 3}), ROUNDS)
+    assert late["score"] == 0.5 and "ruff:F401" in late["comment"]
+    assert ev.converged(_rounds_review({"F1": 1}), ROUNDS)["score"] == 0.5  # F401 never landed
+    assert ev.converged(_rounds_review({}), {})["score"] is None
+    assert ev.converged(_review(), ROUNDS)["score"] is None  # no resolved_in_round key
+
+
+def test_escalations_complete() -> None:
+    one = [{"finding_id": "F2", "kind": "review_request"}]
+    done = _rounds_review({}, applied=["F1"], escalations=one)
+    assert ev.escalations_complete(done, {})["score"] == 1.0
+    assert ev.escalations_complete(done, {"escalations_expected": 1})["score"] == 1.0
+    assert ev.escalations_complete(done, {"escalations_expected": 0})["score"] == 0.0
+    dropped = _rounds_review({}, applied=["F1"], escalations=[])
+    assert "F2 escalated 0x" in ev.escalations_complete(dropped, {})["comment"]
+    twice = _rounds_review({}, applied=["F1"], escalations=one + one)
+    assert ev.escalations_complete(twice, {})["score"] == 0.0
+    clean = _rounds_review({}, applied=["F1", "F2"], escalations=[])
+    assert ev.escalations_complete(clean, {"escalations_expected": 0})["score"] == 1.0
+    assert ev.escalations_complete(_review(), {})["score"] is None  # no escalations key
+
+
+def test_rule_valid_case01() -> None:
+    valid = _review(rule_proposals=[{"rule_id": "ruff:S608", "valid": True}])
+    invalid = _review(rule_proposals=[{"rule_id": "ruff:S608", "valid": False}])
+    assert ev.rule_valid_case01(valid, {"rule_proposal": True})["score"] == 1.0
+    assert ev.rule_valid_case01(invalid, {"rule_proposal": True})["score"] == 0.0
+    assert (
+        ev.rule_valid_case01(_review(rule_proposals=[]), {"rule_proposal": False})["score"] == 1.0
+    )
+    assert ev.rule_valid_case01(valid, {"rule_proposal": False})["score"] == 0.0
+    assert ev.rule_valid_case01(_review(), {"rule_proposal": True})["score"] is None
+    assert ev.rule_valid_case01(valid, {})["score"] is None
+
+
+def test_no_rules_clean() -> None:
+    none = _review(rule_proposals=[])
+    some = _review(rule_proposals=[{"rule_id": "CONV-007", "valid": True}])
+    assert ev.no_rules_clean(none, {"zero_findings": True})["score"] == 1.0
+    assert ev.no_rules_clean(some, {"zero_findings": True})["score"] == 0.0
+    assert ev.no_rules_clean(some, {})["score"] is None
+    assert ev.no_rules_clean(_review(), {"zero_findings": True})["score"] is None
+
+
 def test_summary_micro_averages() -> None:
     rows = [
         {

@@ -68,7 +68,9 @@ uv run pr-agent demo        # builds demo repo, reviews seeded PR #1, prints rev
      - editing `.pr-agent.yml`, `CONVENTIONS.md`, lint configs (`ruff.toml`, `.ruff.toml`, `[tool.ruff]` or any change in `pyproject.toml`, `setup.cfg`, `.semgrep/**`), `CODEOWNERS` or CI (`.github/**`);
      - deleting or skipping tests (removed `test_*` defs/files, added `pytest.mark.skip`/`skipif`/`xfail`/`pytest.skip(`);
      - adding or upgrading dependencies (`pyproject` deps, `requirements*.txt`, `uv.lock`, `poetry.lock`);
-     - paths escaping the repo.
+     - paths escaping the repo;
+     - adding a scanner suppression (`# nosec`, `# noqa`, `# nosemgrep`, `gitleaks:allow`, `# type: ignore`);
+     - editing `.gitattributes`, `.gitleaks.toml`, `.gitleaksignore` or `conftest.py`.
 - Every decision carries `decided_by` (e.g. `paths[0] "src/payments/**" -> critical`, `hard_rule:no_test_skip`). It appears in the review comment **and** in LangSmith metadata (`policy_decisions`, plus the tags `policy:blocked` / `policy:downgraded`).
 - The fixer receives the boundaries as **context only**. Nothing in a prompt is enforcement.
 - A PR that edits `.pr-agent.yml` gets an informational finding: "autonomy config change takes effect only after merge; base config applied".
@@ -119,6 +121,9 @@ flowchart TD
 
 - **Rounds.** After `policy_gate`, `apply_fixes` commits the verified `auto` and approved fixes onto `autofix/<pr>`. When anything landed, `converge` points the PR context at the new branch tip (same base sha) and loops back to `triage`. Analysis, tests and reviewers then run on the improved code, so they catch both what remains and anything a fix introduced, and the next round fixes those.
 - **Per-round state.** Raw findings, fixes, verifications and approvals are reset each round with LangGraph `Overwrite`. A history entry `{round, head_sha, findings, applied}` is appended. Finding ids stay stable across rounds: the same file + rule/category + message keeps its `F<n>`.
+- **Default:** on (`PR_AGENT_CONVERGE=1`). Set `PR_AGENT_CONVERGE=0` for a single round (no `escalate` node).
+- **Deferral:** `verify_fix` lets a fix pass even if it introduces new lint, but only when another round exists and that lint is fixable by a deterministic ruff fix. Otherwise new findings fail verification.
+- **Stable ids:** keyed on file + rule + the flagged line's source text. An id whose fix already landed is never handed to a different finding.
 - **Stop conditions:** no findings remain; or a round makes no progress (nothing applied); or `max_rounds` is reached (default 3, `PR_AGENT_MAX_ROUNDS`).
 - **Escalate, never drop.** Every finding still open at the end becomes an escalation with a reason and a record of what was tried:
 
@@ -144,6 +149,8 @@ flowchart TD
   - Conventions: the CONV-ID is unique and well-formed, both examples pass `ast.parse`, and bad ≠ good. Static firing doesn't apply here, so these are labelled "convention (not machine-checked)".
   - Any failure drops the proposal, and the reason is logged.
 - **Output:** `.pr-agent/runs/<id>/rules/` (rule yml + test file / enable snippet / convention md + `proposals.json`) and a **"Prevent this next time"** section in review.md. `--rules-branch` optionally creates `rules/<pr>` via a temporary worktree. At most 3 proposals per run, recorded in LangSmith metadata as `rule_proposals`.
+- **Critical/high paths:** no fix is attempted there, so there is no fixed code. Only step (a) runs (the rule must fire at the finding, and base hits are counted), and the proposal is labelled "partially verified (no fixed code)".
+- **"Already prevented"** means enforced by the repo's *own* base config (ruff `select`, base `.semgrep/`). The agent's built-in bandit and vendored semgrep rules don't count.
 - **Hard rules vs `rules/<pr>`:** the hard rules forbid the agent from editing `CONVENTIONS.md`, `.semgrep/` and lint configs. So the branch only **adds** files under `pr-agent-proposals/<pr>/`: new rule files, plus ready-to-apply `.patch` files for config/CONVENTIONS changes. A human applies them in their own PR. The hard-rule checker runs on that branch's diff too.
 
 ## 6. Repo layout

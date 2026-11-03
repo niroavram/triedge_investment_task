@@ -1,0 +1,5 @@
+{
+  "branch": "case/13-round-two-lint",
+  "title": "Add a legacy customer description helper",
+  "description": "Ports the describe() helper from the old reporting script."
+}

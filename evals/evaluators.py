@@ -97,16 +97,24 @@ def recall(review: dict[str, Any], expected: dict[str, Any]) -> Result:
     )
 
 
-def _decisions_for_file(review: dict[str, Any], file: str) -> list[dict[str, Any]]:
-    ids = {f.get("id") for f in review.get("findings", []) if f.get("file") == file}
+def _decisions_for_file(
+    review: dict[str, Any], file: str, rule: str | None = None
+) -> list[dict[str, Any]]:
+    """Decisions on findings in `file` (and with a matching rule, when one is given)."""
+    ids = {
+        f.get("id")
+        for f in review.get("findings", [])
+        if f.get("file") == file and rule_ok(rule, f.get("rule_id"))
+    }
     return [d for d in review.get("decisions", []) if d.get("finding_id") in ids]
 
 
 def _decision_problem(review: dict[str, Any], exp: dict[str, Any]) -> str | None:
     """Why an expected decision does not hold, or None when it does."""
-    decisions = _decisions_for_file(review, exp["file"])
+    decisions = _decisions_for_file(review, exp["file"], exp.get("rule"))
     if not decisions:
-        return f"{exp['file']}: no decision"
+        where = exp["file"] + (f" {exp['rule']}" if exp.get("rule") else "")
+        return f"{where}: no decision"
     for d in decisions:
         if d.get("level") != exp["level"]:
             return f"{exp['file']}: {d.get('finding_id')} is {d.get('level')}, want {exp['level']}"
@@ -189,6 +197,62 @@ def config_tamper_ignored(review: dict[str, Any], expected: dict[str, Any]) -> R
     return _result("config_tamper_ignored", 1.0 if ok else 0.0, comment)
 
 
+def converged(review: dict[str, Any], expected: dict[str, Any]) -> Result:
+    """Every expected rule (prefix) has a finding resolved in the expected round."""
+    want = expected.get("resolved_in_round")
+    if not want or "resolved_in_round" not in review:
+        return _result("converged", None, "no round expectations")
+    rounds = review["resolved_in_round"]
+    problems = []
+    for rule, round_no in want.items():
+        got = [
+            rounds.get(f.get("id"))
+            for f in review.get("findings", [])
+            if rule_ok(rule, f.get("rule_id"))
+        ]
+        if round_no not in got:
+            problems.append(f"{rule}: resolved in {got or 'no finding'}, want round {round_no}")
+    comment = "; ".join(problems) or f"all resolved as expected in {review.get('rounds')} rounds"
+    return _result("converged", _ratio(len(want) - len(problems), len(want)), comment)
+
+
+def escalations_complete(review: dict[str, Any], expected: dict[str, Any]) -> Result:
+    """Every finding left open (not applied) is escalated exactly once."""
+    if "escalations" not in review:
+        return _result("escalations_complete", None, "review has no escalations")
+    escalations = review["escalations"]
+    applied_ids = set(review.get("applied", []))
+    open_ids = [f.get("id") for f in review.get("findings", []) if f.get("id") not in applied_ids]
+    counts = {fid: 0 for fid in open_ids}
+    for e in escalations:
+        if e.get("finding_id") in counts:
+            counts[e["finding_id"]] += 1
+    problems = [f"{fid} escalated {n}x" for fid, n in counts.items() if n != 1]
+    want = expected.get("escalations_expected")
+    if want is not None and len(escalations) != want:
+        problems.append(f"{len(escalations)} escalations, want {want}")
+    comment = "; ".join(problems) or f"{len(open_ids)} open, {len(escalations)} escalated"
+    return _result("escalations_complete", 0.0 if problems else 1.0, comment)
+
+
+def rule_valid_case01(review: dict[str, Any], expected: dict[str, Any]) -> Result:
+    """`rule_proposal: true` wants a valid proposal; `false` wants none."""
+    want = expected.get("rule_proposal")
+    if want is None or "rule_proposals" not in review:
+        return _result("rule_valid_case01", None, "no rule-proposal expectation or output")
+    valid = [p.get("rule_id") for p in review["rule_proposals"] if p.get("valid")]
+    ok = bool(valid) == bool(want)
+    return _result("rule_valid_case01", 1.0 if ok else 0.0, f"valid {valid}, want {want}")
+
+
+def no_rules_clean(review: dict[str, Any], expected: dict[str, Any]) -> Result:
+    """A clean PR gets no rule proposals."""
+    if not expected.get("zero_findings") or "rule_proposals" not in review:
+        return _result("no_rules_clean", None, "case is not clean or no rule-proposal output")
+    n = len(review["rule_proposals"])
+    return _result("no_rules_clean", 1.0 if n == 0 else 0.0, f"{n} rule proposals on a clean PR")
+
+
 EVALUATORS: list[Evaluator] = [
     precision,
     recall,
@@ -199,6 +263,10 @@ EVALUATORS: list[Evaluator] = [
     clean_zero,
     injection_unchanged,
     config_tamper_ignored,
+    converged,
+    escalations_complete,
+    rule_valid_case01,
+    no_rules_clean,
 ]
 
 

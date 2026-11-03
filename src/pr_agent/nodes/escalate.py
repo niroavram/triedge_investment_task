@@ -93,7 +93,9 @@ def escalate(state: ReviewState, config: RunnableConfig) -> dict[str, Any]:
     _trace(len(history), items)
     replies: Any = state.get("escalation_replies")
     if items and replies is None:
-        replies = interrupt({"escalations": [e.model_dump(mode="json") for e in items]})
+        # resume value: [[finding_id, answer], ...] (a dict would be read as interrupt ids)
+        pairs = interrupt({"escalations": [e.model_dump(mode="json") for e in items]})
+        replies = dict(pairs or [])
     return {"escalations": items, "escalation_replies": replies or {}}
 
 

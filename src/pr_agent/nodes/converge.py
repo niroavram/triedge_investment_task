@@ -37,7 +37,8 @@ def next_round(state: ReviewState, config: RunnableConfig) -> dict[str, Any]:
     return {
         "ctx": new_ctx,
         "round": state.get("round", 1) + 1,
-        "findings": Overwrite([]),
+        # ingest runs once, so carry its policy notices (e.g. "PR edits .pr-agent.yml")
+        "findings": Overwrite([f for f in state.get("final_findings", []) if f.source == "policy"]),
         "fixes": Overwrite([]),
         "verifications": Overwrite([]),
         "final_findings": [],

@@ -46,7 +46,7 @@ def run_gitleaks(actx: AnalysisContext) -> list[Finding]:
     try:
         extra = stage_files(actx, scratch)
         cmd = [
-            "gitleaks", "dir", "--no-banner", "--redact",
+            "gitleaks", "dir", "--no-banner", "--redact", "--ignore-gitleaks-allow",
             "--report-format", "json", "--report-path", "-",
             *extra, ".",
         ]  # fmt: skip

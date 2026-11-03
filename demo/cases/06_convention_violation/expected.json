@@ -25,8 +25,14 @@
   "decisions": [
     {
       "file": "src/store/reporting.py",
-      "level": "suggest",
-      "decided_by_contains": "default_sensitivity"
+      "rule": "conv:CONV-001",
+      "level": "comment",
+      "decided_by_contains": "public_api_change"
+    },
+    {
+      "file": "src/store/reporting.py",
+      "rule": "conv:CONV-002",
+      "level": "suggest"
     }
   ],
   "owners_tagged": [],

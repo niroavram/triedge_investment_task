@@ -37,7 +37,7 @@ The agent workflow is orchestrated with **LangGraph** and traced and evaluated w
 4. **"An agentic team" means more agents = better.** False. More agents mean more cost, latency and duplicate/noisy comments. Noise is the #1 reason teams uninstall review bots. *Recommendation:* deterministic tools first, a few focused LLM reviewers, then a **dedupe + confidence-threshold aggregator** and a hard cap on comments per PR.
 5. **"Reviewer agent validates the fixer"**: an LLM grading an LLM shares blind spots. *Recommendation:* the critic is necessary but not sufficient. Fix acceptance needs **mechanical evidence**: the patch applies cleanly, the tool finding disappears, targeted tests pass, and no new findings are introduced.
 6. **"Fix everything automatically"** is the wrong goal; **converge or escalate** is the right one. A fix can introduce a new problem, so landed fixes are re-analyzed and re-tested in rounds. Whatever can't be resolved safely becomes a precise human request (a review request with evidence, or a question to the author) instead of being dropped or forced through.
-7. **Whole-repo understanding**: the diff alone misses callers and contracts. Full-repo embedding RAG is expensive to keep fresh. *Recommendation (MVP):* on-demand context tools (read file, grep, find symbol references in the sandbox checkout). Add an index later only if evals show a need.
+7. **Whole-repo understanding**: the diff alone misses callers and contracts. Full-repo embedding RAG is expensive to keep fresh. *Recommendation (first production step):* on-demand context tools (read file, grep, find symbol references in the sandbox checkout). Add an index later only if evals show a need. (The MVP reviewers get the diff plus the changed files only.)
 
 ## 3. Missing requirements & edge cases
 
@@ -72,6 +72,7 @@ The agent workflow is orchestrated with **LangGraph** and traced and evaluated w
 - **Webhook auth**: HMAC `X-Hub-Signature-256` verification with constant-time compare, and replay protection.
 - **Write safety**: never push to protected branches or force-push. Autofix commits are signed as the App, and every applied fix is linked to a trace id for audit.
 - **Supply chain**: pin tool versions in the sandbox image, and scan our own deps (osv-scanner in our CI).
+- **The checkout is hostile too**: tools run as `python -P -m <tool>`, so a PR-supplied `ruff.py` can't shadow the real tool. Files are materialized from the exact blobs (`ls-tree` + `cat-file`), not `git archive`, because the head's `.gitattributes` could `export-ignore` files away from the scanners. The scanners ignore inline suppressions (`--ignore-nosec`, `--disable-nosem`, `--ignore-gitleaks-allow`), and a fix that adds one is FORBIDDEN by a hard rule.
 
 **Performance**
 - Static analyzers and LLM reviewers run in **parallel** (LangGraph fan-out via `Send`).

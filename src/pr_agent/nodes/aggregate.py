@@ -14,7 +14,8 @@ import re
 from langchain_core.runnables import RunnableConfig
 
 from pr_agent.deps import get_deps
-from pr_agent.models import Finding
+from pr_agent.gitutil import show_file
+from pr_agent.models import Finding, PRContext
 from pr_agent.state import ReviewState
 
 _SEVERITY = {"critical": 0, "high": 1, "medium": 2, "low": 3}
@@ -59,26 +60,52 @@ def aggregate(state: ReviewState, config: RunnableConfig) -> dict:
             kept.append(f)
     kept.sort(key=lambda f: (_SEVERITY.get(f.severity, 9), f.file, f.line))
     kept = kept[: settings.max_comments]
-    final, ids = assign_ids(kept, state.get("finding_ids") or {})
+    ctx = state.get("ctx")
+    landed = {fid for r in state.get("history", []) for fid in r["applied"]}
+    anchors = _line_texts(ctx, kept) if ctx else {}
+    final, ids = assign_ids(kept, state.get("finding_ids") or {}, anchors, landed)
     return {"final_findings": final, "finding_ids": ids}
 
 
-def stable_key(f: Finding, ordinal: int) -> str:
-    """Identity that survives line shifts between rounds: file + rule (or source/category)."""
-    return f"{f.file}|{f.rule_id or f.source + ':' + f.category}|{ordinal}"
+def _line_texts(ctx: PRContext, findings: list[Finding]) -> dict[tuple[str, int], str]:
+    """The flagged source line per finding, from the current head: an anchor that survives
+    line shifts between rounds (unlike the line number) and differs between two findings of
+    the same rule in one file (unlike file + rule alone)."""
+    out: dict[tuple[str, int], str] = {}
+    for path in {f.file for f in findings}:
+        lines = (show_file(ctx.repo_path, ctx.head_sha, path) or "").splitlines()
+        for f in findings:
+            if f.file == path and 0 < f.line <= len(lines):
+                out[(path, f.line)] = " ".join(lines[f.line - 1].split())
+    return out
 
 
-def assign_ids(findings: list[Finding], known: dict[str, str]) -> tuple[list[Finding], dict]:
-    """Reuse F<n> for a finding seen in an earlier round; new findings get the next number."""
+def stable_key(f: Finding, anchor: str, ordinal: int) -> str:
+    """file + rule (or source/category) + the flagged line's text + ordinal among equals."""
+    return f"{f.file}|{f.rule_id or f.source + ':' + f.category}|{anchor}|{ordinal}"
+
+
+def assign_ids(
+    findings: list[Finding],
+    known: dict[str, str],
+    anchors: dict[tuple[str, int], str] | None = None,
+    landed: set[str] | None = None,
+) -> tuple[list[Finding], dict[str, str]]:
+    """Reuse F<n> for a finding seen in an earlier round; new findings get the next number.
+
+    An id whose fix already landed is never handed out again: a still-open finding must not
+    inherit a resolved one's id (it would be shown as fixed and never escalated).
+    """
     ids = dict(known)
+    anchors, landed = anchors or {}, landed or set()
     next_no = 1 + max((int(v.lstrip("F")) for v in ids.values()), default=0)
     seen: dict[str, int] = {}
     out = []
     for f in findings:
-        base = stable_key(f, 0).rsplit("|", 1)[0]
+        base = stable_key(f, anchors.get((f.file, f.line), ""), 0)
         seen[base] = seen.get(base, 0) + 1
-        key = stable_key(f, seen[base])
-        if key not in ids:
+        key = stable_key(f, anchors.get((f.file, f.line), ""), seen[base])
+        if key not in ids or ids[key] in landed:
             ids[key] = f"F{next_no}"
             next_no += 1
         out.append(f.model_copy(update={"id": ids[key]}))

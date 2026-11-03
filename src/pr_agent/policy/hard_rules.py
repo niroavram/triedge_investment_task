@@ -23,7 +23,11 @@ PATH_RULES: dict[str, list[str]] = {
         ".bandit",
         ".semgrep/",
         ".semgrepignore",
+        ".gitleaks.toml",
+        ".gitleaksignore",
+        ".gitattributes",  # export-ignore / export-subst change what the scanners see
         "pyproject.toml",
+        "conftest.py",
     ],
     "no_codeowners_edit": ["CODEOWNERS"],  # root, .github/ and docs/ (any directory)
     "no_ci_edit": [".github/", ".gitlab-ci.yml", "Jenkinsfile"],
@@ -42,6 +46,10 @@ SKIP_MARKERS = (
     "pytest.mark.xfail",
     "pytest.skip(",
     "unittest.skip",
+)
+# Comments that silence a scanner: a "fix" must never be an added suppression.
+SUPPRESSIONS = re.compile(
+    r"#\s*(?:nosec|noqa|nosemgrep|type:\s*ignore|pragma:\s*no\s*cover)|gitleaks:allow", re.I
 )
 TEST_DEF = re.compile(r"^\s*(?:async\s+)?def\s+(test_\w*)")
 
@@ -100,6 +108,8 @@ def hard_rule_violations(patch: str) -> list[tuple[str, str]]:
                     added_tests.add(test.group(1))
                 if line.is_added and any(m in line.value for m in SKIP_MARKERS):
                     out.append(("no_test_skip", f"{pf.path}: {line.value.strip()}"))
+                if line.is_added and SUPPRESSIONS.search(line.value):
+                    out.append(("no_suppression", f"{pf.path}: {line.value.strip()[:80]}"))
     for name in sorted(removed_tests - added_tests):
         out.append(("no_test_deletion", f"removed {name}"))
     return out

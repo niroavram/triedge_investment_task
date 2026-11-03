@@ -141,16 +141,16 @@ flowchart LR
 - **Inputs:** the finding, the patch and the fixer's explanation (all wrapped, since they derive from PR code).
 - **Why the critic isn't enough on its own:** an LLM grading an LLM shares its blind spots. Every accepted patch still goes through `verify_fix`, which supplies mechanical evidence.
 
-### `rule_drafter` (designed, not built yet)
+### `rule_drafter`
 
 **Mission.** Turn a verified finding into a rule that prevents the same mistake upfront next time.
 
 | | |
 |---|---|
-| Prompt | `src/pr_agent/agents/prompts/rule_drafter.md` (planned) |
-| Code | `agents/rule_drafter.py`, node `learn_rules` (planned) |
+| Prompt | `src/pr_agent/agents/prompts/rule_drafter.md` |
+| Code | `agents/rule_drafter.py`, node `learn_rules` (`nodes/learn.py`); ladder step (a) in `learning/existing_rules.py` |
 | Model | review model, role `rule` |
-| Output schema | `RuleProposal { finding_id, kind: enable_rule \| semgrep_rule \| convention, rule_id, content, test_content?, valid, base_hits, note }` |
+| Output schema | `RuleDraft { rule_yaml, test_code, rationale }` / `ConventionDraft { title, rationale, bad_example, good_example }`, turned into `RuleProposal { finding_id, kind: enable_rule \| semgrep_rule \| convention, rule_id, content, test_content?, valid, base_hits, note }` |
 | Permissions | No tools, no write access. Proposals are written by deterministic code to `.pr-agent/runs/<id>/rules/`, and optionally to a separate `rules/<pr>` branch that only *adds* files under `pr-agent-proposals/<pr>/` |
 | Escalation | A proposal is a suggestion for a human-opened PR; it is never applied automatically |
 | Eval metric | `rule_valid_case01` (a valid rule that catches case 01), `no_rules_clean` (case 07 yields none) |
@@ -159,6 +159,8 @@ flowchart LR
   1. Enable an existing rule. This step is deterministic and makes no LLM call.
   2. Draft a semgrep rule `custom:<AREA>-<n>`, with a `# ruleid:` / `# ok:` test file.
   3. Draft a `CONVENTIONS.md` entry with a new CONV-ID and bad/good examples.
+- **Critical/high paths** (no fix is attempted, so there is no fixed code): only ladder step (a) runs. The rule must fire at the finding, and its base hits are counted. The proposal is labelled "partially verified (no fixed code)".
+- **"Already prevented"** means the repo's *own* base config enforces the rule (ruff `select`, base `.semgrep/`). The agent's built-in bandit and vendored semgrep rules don't count, because they don't run in the repo's CI.
 - **Validation:** done by `verify_rule` (deterministic). Failing proposals are dropped. A rule with more than 5 base hits is flagged "would also flag N existing places".
 - **Must not:** edit `.semgrep/`, `CONVENTIONS.md` or lint configs directly (hard rules), or propose more than 3 rules per run.
 
@@ -172,8 +174,8 @@ flowchart LR
 | aggregate | `nodes/aggregate.py` | Confidence threshold (LLM findings only), CONV-ID validation, dedupe (±2 lines, tool evidence wins), rank, cap 15, stable `F<n>` ids | raw `Finding[]` → `final_findings` | Pure function | `test_aggregate.py` |
 | verify_fix | `nodes/verify.py` | Apply the patch to a fresh head copy; the finding must be gone; no new *blocking* findings (new lint is deferred to the next round); tests pass | proposal → `Verification {passed, checks, log}` | Fails closed: if an analyzer can't run, verification fails | `test_verify.py` |
 | policy_gate | `policy/*`, `nodes/gate.py` | The most restrictive of path / route / fix type / public API change / lint rule / limits / hard rules, with `decided_by`; `interrupt()` for approval of `suggest` fixes | findings + fixes + verifications + base config → `PolicyDecision[]`, `approved` | Missing or invalid config fails closed: suggest-only | `test_policy_engine.py`, `test_policy_cases.py`, `test_routes.py`, `test_api_diff.py`, `test_hard_rules.py`, `test_gate.py` |
-| verify_rule (planned) | `learning/verify_rule.py` | `semgrep --test` passes; the rule fires on head at the finding and is silent on the fixed code; base hit count | `RuleProposal` → `valid`, `base_hits` | Any failure drops the proposal | planned: `test_verify_rule.py` |
-| convergence loop (experimental, `PR_AGENT_CONVERGE=1`) | `nodes/apply.py`, `nodes/converge.py`, `nodes/escalate.py` | Land fixes on `autofix/<pr>`, re-run on the new tip until no findings / no progress / `max_rounds`; escalate every open finding | state → `history`, `escalations` | Stops on no progress; nothing is dropped; escalations use `interrupt()` | planned: case 13 + unit tests |
+| verify_rule | `learning/verify_rule.py` | `semgrep --test` passes; the rule fires on head at the finding and is silent on the fixed code; base hit count | `RuleProposal` → `valid`, `base_hits` | Any failure drops the proposal | `test_verify_rule.py`, `test_rule_learning.py` |
+| convergence loop (on by default; `PR_AGENT_CONVERGE=0` for a single round) | `nodes/apply.py`, `nodes/converge.py`, `nodes/escalate.py` | Land fixes on `autofix/<pr>`, re-run on the new tip until no findings / no progress / `max_rounds`; escalate every open finding | state → `history`, `escalations` | Stops on no progress; nothing is dropped; escalations use `interrupt()` | `test_convergence.py`, case 13, `test_graph_e2e.py` |
 
 ### Escalation matrix (convergence loop)
 

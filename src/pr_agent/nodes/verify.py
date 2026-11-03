@@ -50,6 +50,11 @@ def finding_gone(original: Finding, after: list[Finding]) -> bool:
 DEFERRABLE = {"lint", "format"}
 
 
+def deferrable(f: Finding) -> bool:
+    """Lint/format a deterministic tool can fix next round (not e.g. F821 or a ruff S-rule)."""
+    return f.category in DEFERRABLE and f.source == "ruff" and f.fixable
+
+
 def new_findings(before: list[Finding], after: list[Finding]) -> list[Finding]:
     """Findings whose (rule_id, file) count grew after the patch. Lines shift, so ignore them."""
     remaining = Counter((f.rule_id, f.file) for f in before)
@@ -79,6 +84,7 @@ def check_patch(
     patch: str,
     workdir: Path,
     base_dir: Path | None = None,
+    can_defer: bool = False,
 ) -> tuple[dict[str, bool], list[str]]:
     """Run the checks in order inside workdir (a clean head checkout). Returns (checks, log).
 
@@ -95,7 +101,7 @@ def check_patch(
     after, errors_after = scan(deps.sandbox, workdir, base_dir, files)
     errors = errors_before + errors_after
     grown = new_findings(before, after)
-    blocking = [g for g in grown if g.category not in DEFERRABLE]
+    blocking = [g for g in grown if not (can_defer and deferrable(g))]
     log = [f"analyzer error: {e}" for e in errors]
     log += [f"new finding: {g.rule_id} in {g.file}" for g in blocking]
     log += [
@@ -129,7 +135,15 @@ def verify_fix(state: dict, config: RunnableConfig) -> dict:
     workdir = materialize(ctx.repo_path, ctx.head_sha)
     base_dir = materialize(ctx.repo_path, ctx.base_sha)
     try:
-        checks, log = check_patch(deps, state["finding"], ctx, proposal.patch, workdir, base_dir)
+        checks, log = check_patch(
+            deps,
+            state["finding"],
+            ctx,
+            proposal.patch,
+            workdir,
+            base_dir,
+            can_defer=state.get("can_defer", False),
+        )
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
         shutil.rmtree(base_dir, ignore_errors=True)

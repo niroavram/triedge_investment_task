@@ -105,8 +105,8 @@ class RuleProposal(BaseModel):
 
 def fix_type_for(f: Finding) -> FixType:
     """Fix type comes from where the finding came from, never from the LLM's opinion."""
-    if f.category == "format":
-        return "format"
+    if f.category == "format" and f.source == "ruff":
+        return "format"  # only the formatter's own finding; an LLM "format" claim is a bug
     if f.source == "ruff" or (f.rule_id or "").startswith(("custom:", "conv:")):
         return "lint"  # repo lint rules (ruff, custom semgrep) and CONV-IDs -> lint_rules caps
     if f.category == "convention" or f.source == "llm:conventions":

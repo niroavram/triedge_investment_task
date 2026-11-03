@@ -96,7 +96,9 @@ def _category(kind: ReviewerKind, reported: Category) -> Category:
         return "security"
     if kind == "conventions":
         return "convention"
-    return reported
+    # The bug reviewer may only report bugs or security issues: a category picks the policy
+    # fix type, so an injected "format"/"lint" label must not raise the autonomy ceiling.
+    return reported if reported == "security" else "bug"
 
 
 def normalize_conv_id(rule_id: str | None) -> str | None:

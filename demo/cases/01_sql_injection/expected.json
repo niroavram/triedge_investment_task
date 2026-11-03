@@ -22,5 +22,6 @@
   "fix_verified": true,
   "applied": false,
   "config_change_flagged": false,
-  "injection": false
+  "injection": false,
+  "rule_proposal": true
 }

@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import math
 import re
-from collections import Counter
 from typing import Any
 
 REDACTED = "[REDACTED]"
@@ -16,17 +14,16 @@ _PATTERNS = [
     re.compile(r"\bsk-[A-Za-z0-9_\-]{20,}\b"),
     re.compile(r"\blsv2_[A-Za-z0-9_]{20,}\b"),
     re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),
+    re.compile(r"\b[sr]k_(?:live|test)_[A-Za-z0-9]{10,}\b"),  # Stripe
+    re.compile(r"\bAIza[0-9A-Za-z_\-]{30,}\b"),  # Google API key
+    re.compile(r"\beyJ[A-Za-z0-9_\-]{8,}\.eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\b"),  # JWT
+    re.compile(r"(?<=://)[^/\s:@]+:[^/\s@]+(?=@)"),  # user:password@ in URLs
 ]
 # key = "value" where key looks secret-ish; value redacted if long and high-entropy
 _ASSIGN = re.compile(
-    r"""(?i)((?:password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)\w*"""
+    r"""(?i)(\w*(?:password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|_key)\w*"""
     r"""\s*[:=]\s*['"])([^'"\s]{8,})(['"])"""
 )
-
-
-def _entropy(s: str) -> float:
-    counts = Counter(s)
-    return -sum(c / len(s) * math.log2(c / len(s)) for c in counts.values())
 
 
 def redact_text(text: str) -> str:
@@ -34,8 +31,8 @@ def redact_text(text: str) -> str:
         text = p.sub(REDACTED, text)
 
     def _mask(m: re.Match[str]) -> str:
-        value = m.group(2)
-        return m.group(1) + (REDACTED if _entropy(value) >= 3.0 else value) + m.group(3)
+        # Named like a secret and 8+ chars: redact even low-entropy values ("hunter2hunter2").
+        return m.group(1) + REDACTED + m.group(3)
 
     return _ASSIGN.sub(_mask, text)
 

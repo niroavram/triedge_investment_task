@@ -19,7 +19,6 @@ from pr_agent.agents.critic import CriticOutput
 from pr_agent.agents.fixer import FixOutput, apply_edits
 from pr_agent.agents.llm import load_prompt
 from pr_agent.agents.reviewers import ReviewOutput
-from pr_agent.analyzers import ANALYZERS
 from pr_agent.demo import DEMO_DIR, demo_secret, list_cases, load_case, render
 from pr_agent.gitutil import git, show_file
 from pr_agent.settings import Settings
@@ -45,8 +44,8 @@ def _overlay(case_dir: Path) -> dict[str, str]:
     return out
 
 
-def test_twelve_cases() -> None:
-    assert [c.name[:2] for c in CASES] == [f"{i:02d}" for i in range(1, 13)]
+def test_thirteen_cases() -> None:
+    assert [c.name[:2] for c in CASES] == [f"{i:02d}" for i in range(1, 14)]
 
 
 @pytest.mark.parametrize("case_dir", CASES, ids=CASE_IDS)
@@ -139,19 +138,23 @@ def test_scripted_llm_picks_fix_by_location() -> None:
 
 # --- offline end to end -----------------------------------------------------------------
 
-NO_RUFF = pytest.mark.xfail(
-    "ruff" not in ANALYZERS,
-    reason="src/ has no ruff analyzer / deterministic ruff fix yet (ANALYZERS has no 'ruff'), "
-    "so the F401 finding is never produced",
+LOOP_ON = Settings().converge  # default on; PR_AGENT_CONVERGE=0 runs a single round
+SINGLE_ROUND = pytest.mark.xfail(
+    not LOOP_ON,
+    reason="single-round mode: the ruff:format finding the F401 fix leaves behind is only "
+    "fixed by convergence round 2",
     strict=False,
 )
 DETERMINISTIC = [
     pytest.param("01", id="01_sql_injection"),
     pytest.param("09", id="09_critical_path_bug"),
     pytest.param("10", id="10_config_tamper"),
-    pytest.param("11", id="11_low_path_lint", marks=NO_RUFF),
+    pytest.param("11", id="11_low_path_lint", marks=SINGLE_ROUND),
     pytest.param("12", id="12_low_and_critical"),
+    pytest.param("13", id="13_round_two_lint", marks=SINGLE_ROUND),
 ]
+# The single-round graph has no escalate node, so open findings are never escalated there.
+PENDING = set() if LOOP_ON else {"escalations_complete", "converged"}
 
 
 @pytest.mark.parametrize("prefix", DETERMINISTIC)
@@ -162,7 +165,13 @@ def test_offline_case_passes_evaluators(demo_repo: Path, tmp_path: Path, prefix:
         demo_repo, case_dir, ScriptedLLM.for_case(case_dir), Settings(work_dir=tmp_path)
     )
     results = evaluate_case(review, expected)
-    failed = {k: r["comment"] for k, r in results.items() if r["score"] not in (None, 1.0)}
+    failed = {
+        k: r["comment"]
+        for k, r in results.items()
+        if k not in PENDING and r["score"] not in (None, 1.0)
+    }
+    if prefix == "13" and not LOOP_ON:  # one round: only UP045 is found and fixed
+        failed.pop("recall", None)
     assert not failed
 
     levels = {d["level"] for d in review["decisions"]}
@@ -178,6 +187,23 @@ def test_offline_case_passes_evaluators(demo_repo: Path, tmp_path: Path, prefix:
         assert levels == {"auto"} and review["applied"]
         fixed = show_file(demo_repo, review["autofix_branch"], "scripts/report.py")
         assert fixed is not None and "import sys" not in fixed
+
+
+def test_case13_converges_in_round_two(demo_repo: Path, tmp_path: Path) -> None:
+    """Loop on: the UP045 fix leaves `Optional` unused (F401), which round 2 fixes; round 3
+    finds nothing, so nothing is escalated."""
+    case_dir = _case("13")
+    settings = Settings(work_dir=tmp_path, converge=True)
+    review = run_case(demo_repo, case_dir, ScriptedLLM.for_case(case_dir), settings)
+    results = evaluate_case(review, load_case(case_dir)["expected"])
+    assert results["converged"]["score"] == 1.0, results["converged"]["comment"]
+    assert results["escalations_complete"]["score"] == 1.0
+    rules = {f["id"]: f["rule_id"] for f in review["findings"]}
+    resolved = {rules[fid]: n for fid, n in review["resolved_in_round"].items()}
+    assert resolved == {"ruff:UP045": 1, "ruff:F401": 2}
+    assert review["escalations"] == [] and review["rounds"] == 3  # round 3 is the clean one
+    fixed = show_file(demo_repo, review["autofix_branch"], "scripts/legacy_report.py")
+    assert fixed is not None and "str | None" in fixed and "Optional" not in fixed
 
 
 def test_main_offline_writes_results(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

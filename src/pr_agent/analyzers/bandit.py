@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from pr_agent.analyzers.base import AnalysisContext, python_files, relative_path
+from pr_agent.analyzers.base import AnalysisContext, python_files, relative_path, tool_cmd
 from pr_agent.models import Finding, Severity
 
 _SEVERITY: dict[str, Severity] = {"LOW": "low", "MEDIUM": "medium", "HIGH": "high"}
@@ -18,7 +18,16 @@ def run_bandit(actx: AnalysisContext) -> list[Finding]:
     if not files:
         return []
     # B101 (assert used) is skipped: asserts are the pytest idiom, flagging them is noise.
-    cmd = [*actx.sandbox.python(), "-m", "bandit", "-q", "-f", "json", "-s", "B101", *files]
+    cmd = [
+        *tool_cmd(actx.sandbox, "bandit"),
+        "-q",
+        "-f",
+        "json",
+        "-s",
+        "B101",
+        "--ignore-nosec",
+        *files,
+    ]
     res = actx.sandbox.run(cmd, actx.workdir)
     if res.timed_out or res.returncode not in (0, 1):  # 1 = issues found, not an error
         raise RuntimeError(f"bandit exit {res.returncode}: {res.stderr.strip()[:300]}")

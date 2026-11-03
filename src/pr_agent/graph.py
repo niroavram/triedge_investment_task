@@ -3,7 +3,8 @@
 ingest -> triage -> [Send] static analysis + tests + LLM reviewers -> aggregate
        -> [Send per fixable finding] fix_pipeline (propose -> critic (<=2 revisions) -> verify)
        -> policy_gate (deterministic; interrupt() for `suggest`) -> apply_fixes
-       -> converge: next_round (back to triage on the autofix tip) | escalate -> publish
+       -> converge: next_round (back to triage on the autofix tip) | escalate
+       -> learn_rules ("prevent this next time", non-blocking) -> publish
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from pr_agent.nodes.converge import next_round, route_converge
 from pr_agent.nodes.escalate import escalate
 from pr_agent.nodes.gate import policy_gate
 from pr_agent.nodes.ingest import ingest
+from pr_agent.nodes.learn import learn_rules
 from pr_agent.nodes.publish import publish
 from pr_agent.nodes.review import make_reviewer_node
 from pr_agent.nodes.tests import test_runner
@@ -95,6 +97,10 @@ def fan_out_fixes(state: ReviewState, config: RunnableConfig) -> list[Send] | st
                 "config": state.get("config"),
                 "conventions": state.get("conventions", ""),
                 "attempts": 0,
+                "max_revisions": settings.max_revisions,
+                # new lint a fix introduces may wait for the next round only if one exists
+                "can_defer": settings.converge
+                and state.get("round", 1) < state.get("max_rounds", settings.max_rounds),
             },
         )
         for f in candidates
@@ -118,6 +124,7 @@ def build_graph(  # type: ignore[no-untyped-def]
     if converge:
         g.add_node("next_round", next_round)
         g.add_node("escalate", escalate)
+    g.add_node("learn_rules", learn_rules)  # non-blocking: failures become a skipped status
     g.add_node("publish", publish)
 
     g.add_edge(START, "ingest")
@@ -135,9 +142,10 @@ def build_graph(  # type: ignore[no-untyped-def]
             "apply_fixes", route_converge, {"next_round": "next_round", "finish": "escalate"}
         )
         g.add_edge("next_round", "triage")
-        g.add_edge("escalate", "publish")
+        g.add_edge("escalate", "learn_rules")
     else:
-        g.add_edge("apply_fixes", "publish")
+        g.add_edge("apply_fixes", "learn_rules")
+    g.add_edge("learn_rules", "publish")
     g.add_edge("publish", END)
     return g.compile(checkpointer=checkpointer)
 
@@ -156,6 +164,7 @@ def serializer() -> JsonPlusSerializer:
                 "ChangedFile",
                 "PRContext",
                 "RuleProposal",
+                "Escalation",
             )
         ]
     )

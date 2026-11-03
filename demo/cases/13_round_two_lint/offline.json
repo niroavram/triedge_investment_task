@@ -1,0 +1,12 @@
+{
+  "reviews": {
+    "security": [],
+    "bug": [],
+    "conventions": []
+  },
+  "fixes": {},
+  "critic": {
+    "verdict": "accept",
+    "notes": "minimal and correct"
+  }
+}

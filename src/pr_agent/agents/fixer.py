@@ -61,7 +61,8 @@ def _user_message(finding: Finding, files: dict[str, str], boundaries: str, feed
     if boundaries:
         parts += ["## Autonomy boundaries (context)", boundaries]
     if feedback:
-        parts += ["## Reviewer feedback on your previous attempt", feedback]
+        # critic notes are LLM output over PR content: second-order untrusted data
+        parts += ["## Reviewer feedback on your previous attempt", untrusted("critic", feedback)]
     return "\n\n".join(parts)
 
 

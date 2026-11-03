@@ -17,7 +17,8 @@ def _title(state: ReviewState) -> str:
 
 
 def _banners(state: ReviewState) -> str:
-    return "\n\n".join(f"> {b}" for b in state.get("banners", []))
+    unique = list(dict.fromkeys(state.get("banners", [])))  # each round may re-add a banner
+    return "\n\n".join(f"> {b}" for b in unique)
 
 
 def _summary(findings: list[Finding], decisions: list[PolicyDecision]) -> str:
@@ -113,8 +114,16 @@ def _rule_proposals(state: ReviewState) -> str:
     valid = [r for r in state.get("rule_proposals", []) if r.valid]
     if not valid:
         return ""
-    lines = [f"- `{r.rule_id}` ({r.kind}, from {r.finding_id}): {r.note}" for r in valid]
-    return "### Prevent this next time\n\n" + "\n".join(lines)
+    lines = [
+        f"- `{r.rule_id}` ({r.kind}, from {r.finding_id}): {r.note or 'verified'} "
+        f"(base_hits: {r.base_hits})"
+        for r in valid
+    ]
+    return (
+        "### Prevent this next time\n\n"
+        + "\n".join(lines)
+        + "\n\nProposal files are in the run's `rules/` directory; apply them in your own PR."
+    )
 
 
 def _rounds(state: ReviewState) -> str:

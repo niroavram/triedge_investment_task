@@ -34,52 +34,71 @@ Outputs go to `.pr-agent/runs/<run-id>/`: `review.md`, `review.json` and `patche
 
 ## Status
 
-Last updated: v1-submission.
+Last updated: merge of rule learning, the convergence loop (now on by default) and the independent code-review fixes.
 
 ### Implemented and tested
 
-Everything below ran in this environment: `ruff check`, `mypy` and `pytest` give **347 passed, 2 skipped**. The tests run with no API keys and no network, using a fake/scripted LLM and the real tools.
+Everything below ran in this environment. `ruff check` and `mypy` are clean. `pytest` gives **415 passed** with the convergence loop on (the default), and **413 passed + 2 expected xfails** with `PR_AGENT_CONVERGE=0`; the 2 xfails are fixes that only round 2 can make. The tests use no API keys and no network: a fake/scripted LLM plus the real git, ruff, bandit, semgrep and pytest.
 
-- **Ingest:** local branches (`--local`) and GitHub PR URLs, using REST metadata, a partial clone and `refs/pull/N/head`. URL mode is tested against a mocked API and a local bare repo, not against github.com.
-- **Diff parsing and triage:** file filters, docs/config-only PRs.
-- **Analyzers:** ruff (with deterministic fixes), bandit, and semgrep with vendored offline rules plus the base branch's `.semgrep/`. All analyzer configs are read from the **base** branch.
-- **Test runner:** pytest, reporting only failures the PR introduced (it compares against base).
-- **LLM agents:** bug, security and conventions reviewers, fix_proposer (search/replace edits turned into a diff deterministically) and fix_critic, with up to 2 revisions. PR content is wrapped as untrusted, prompt-injection hardening is in place, and CONV-IDs are validated.
-- **verify_fix:** the patch applies, the finding is gone, no new blocking findings appear, and tests pass.
-- **Autonomy boundaries**, enforced deterministically from the base-branch `.pr-agent.yml`:
-  - paths, routes (resolved from FastAPI/Flask code with `ast`), fix types, public API changes (AST signature diff), lint rules, limits and hard rules;
-  - fail-closed on a missing or invalid config;
-  - every decision is named by its `decided_by` rule;
-  - `pr-agent init` / `check-config`.
-- **Approval gate:** `interrupt()` with interactive approval, plus `pr-agent resume`, which time-travels to the gate without re-running the LLMs.
-- **Publishing:** review.md, review.json, patch files, and a local `autofix/<pr>` branch written via a temporary worktree.
-- **Redaction:** secrets are redacted in the review output and in the LangSmith payload hooks.
-- **Demo and evals:**
-  - a demo repo with **12 seeded cases**, where the secret is derived at build time and never committed;
-  - an offline eval with a scripted LLM;
-  - evaluators: precision, recall, policy_correct, owners_tagged, fix_verified, applied, clean_zero, injection_unchanged, config_tamper_ignored;
-  - offline end-to-end tests for cases 01, 09, 10, 11 and 12.
+- **Ingest:** local branches (`--local`) and GitHub PR URLs, using REST metadata, a partial clone and `refs/pull/N/head`. URL mode is tested against a mocked API and a local bare repo.
+- **Triage and diff parsing:** file filters, docs/config-only PRs.
+- **Analyzers:** ruff (with deterministic fixes), bandit, semgrep (vendored offline rules + the base branch's `.semgrep/`).
+  - Every config is read from the **base** branch.
+  - Inline suppressions in the PR are ignored.
+  - Tools run as `python -P -m <tool>`, so a PR-supplied `ruff.py` can't run in place of the tool.
+- **Test runner:** pytest, reporting only failures the PR introduced.
+- **LLM agents** ([AGENTS.md](docs/AGENTS.md)): bug, security and conventions reviewers, fix_proposer and fix_critic (≤ 2 revisions), and rule_drafter.
+  - PR content is wrapped as untrusted, including critic feedback.
+  - The LLM can't choose the fix type or the policy level.
+- **verify_fix:** the patch applies, the finding is gone, no new blocking findings, and tests pass. New lint is deferred only when another round exists and ruff can fix it.
+- **Autonomy boundaries:**
+  - The most restrictive of path, route (`ast`), fix type, public API change, lint rule, limits and hard rules.
+  - Hard rules include no added suppressions, and no edits to `.gitattributes`/scanner configs.
+  - Fail-closed, with `decided_by` on every decision, plus `pr-agent init` / `check-config`.
+- **Approval gate:** `interrupt()` with interactive approval. `pr-agent resume` time-travels to the gate and only accepts ids that are actually awaiting approval.
+- **Convergence loop (on by default):**
+  - Lands fixes on `autofix/<pr>` and re-analyzes the new tip.
+  - Stops on no findings, no progress, or `max_rounds` (3).
+  - Every open finding is escalated, never dropped: a review request to the owners with evidence, or a concrete question to the author, under "Needs your input".
+  - Finding ids stay stable across rounds.
+- **Rule learning:**
+  - Ladder: (a) enable an existing rule (deterministic), (b) a new semgrep rule, (c) a CONVENTIONS entry.
+  - Validated by `verify_rule` (`semgrep --test`, fires on head, silent on the fixed code, base hit count).
+  - Critical/high paths get step (a) only, labelled "partially verified (no fixed code)".
+  - Output: a "Prevent this next time" section plus `rules/` files.
+- **Publishing:** review.md, review.json, patch files, and a local `autofix/<pr>` branch via a temporary worktree.
+- **Redaction:** secrets are redacted in all output and in the LangSmith payload hooks: provider keys, Stripe, Google, JWTs, URL credentials, and secret-named assignments.
+- **Evals:** 13 seeded cases. The offline run ([evals/results.md](evals/results.md), scripted LLM, loop on) gives:
+  - precision 100%, recall 95%, fix pass rate 100% (15/15);
+  - policy_correct, owners_tagged, clean_zero, injection_unchanged, config_tamper_ignored, converged, escalations_complete, rule_valid_case01 and no_rules_clean all at 100%.
 
 ### Implemented, not verified here
 
-- **Live LLM and LangSmith runs** (`pr-agent demo`, `pr-agent eval` without `--offline`): no API keys were available in the build environment, so no real model output or LangSmith trace has been observed yet. `evals/results.md` is from the **offline** (scripted LLM) run.
-- **Docker sandbox** (`--network none`, CPU/memory/pid limits, read-only root, dropped capabilities) and **gitleaks**: only command construction and output parsing are unit-tested, because no Docker daemon or gitleaks binary was available. Without Docker the tool falls back to a local temp dir and shows a banner.
-- **`--post`** (posting the review to GitHub): tested against a mocked API only.
+- **Live LLM and LangSmith runs** (`pr-agent demo`, and `pr-agent eval` without `--offline`): no API keys were available yet, so no real model output or LangSmith trace has been observed.
+- **Docker sandbox and gitleaks:** only command construction and parsing are unit-tested (no Docker daemon here). Without Docker, the tool falls back to a local temp dir and shows a banner.
+- **`--post`** (posting the review to GitHub): mocked API only.
 
 ### Designed, not built yet
 
-- **Convergence loop and escalation**: re-run on `autofix/<pr>` until no findings / no progress / `max_rounds`, then "Needs your input" escalations. The code exists behind `PR_AGENT_CONVERGE=1` and is **disabled by default** because it hasn't been verified yet. Design: [plan §5, convergence loop](docs/IMPLEMENTATION_PLAN.md#convergence-loop-and-escalation), [AGENTS.md escalation matrix](docs/AGENTS.md#escalation-matrix-convergence-loop). Eval case 13 isn't added yet.
-- **Rule learning**: rule_drafter, verify_rule, "Prevent this next time". Design: [plan §5, rule learning](docs/IMPLEMENTATION_PLAN.md#rule-learning), [DESIGN.md §7](docs/DESIGN.md#7-rule-learning-prevent-this-next-time), [AGENTS.md rule_drafter](docs/AGENTS.md#rule_drafter-designed-not-built-yet).
-- **Generated role cards**: `docs/AGENTS.md` generated from prompt headers and checked by a unit test. Today it is hand-written.
+- **`--rules-branch`:** a separate `rules/<pr>` branch with the proposals ([plan §5, rule learning](docs/IMPLEMENTATION_PLAN.md#rule-learning)). Proposals are written to `.pr-agent/runs/<id>/rules/` today.
+- **Generated role cards:** `docs/AGENTS.md` generated from prompt headers and checked by a test. Today it is hand-written.
 - **The production path** (GitHub App, webhooks, queue, Postgres, k8s sandbox, feedback loop): [DESIGN.md §9](docs/DESIGN.md#9-production-path-what-the-mvp-leaves-out-and-how-each-piece-comes-back).
 
 ### Known issues
 
-- `tests/test_graph_e2e.py` (the full graph with a fake LLM, including the approval/resume path) is **skipped: it hangs, under investigation**. The hang appeared after the convergence-loop changes. Similar full-graph runs in `tests/test_cases.py` pass.
-- Offline eval ([evals/results.md](evals/results.md), scripted LLM): precision 100%, recall 94%, fix pass rate 100% (12/12), policy_correct 91%. There are two gaps:
-  - Case 05, recall 0.67: the UP045 fix leaves an unused import, which the next round of the convergence loop would fix.
-  - Case 06, policy_correct 0: the CONV-001 fix changes a public signature, so the policy correctly downgrades it to `comment`, but the case's expectation still says `suggest`. The expectation needs revisiting.
-- `src/` is about 4.5k lines including docstrings and blank lines, above the 2–2.5k target.
+- Case 05 recall is 0.67 in the offline eval: one of the three expected lint findings isn't reported, because the scripted case doesn't produce it. Under investigation.
+- `src/` is about 5.5k lines including docstrings and blank lines, well above the original 2–2.5k target.
+- **Fixed in this release:** the e2e hang (an empty-dict resume value) and the independent code review's confirmed findings:
+  - tool shadowing by PR files;
+  - `.gitattributes` hiding files from the scanners;
+  - LLM-chosen fix types;
+  - finding-id reuse across rounds;
+  - redaction gaps;
+  - honoured suppressions;
+  - resume routing;
+  - over-eager deferral.
+
+  Regression tests are in `tests/unit/test_review_fixes.py`.
 
 ## Development
 

@@ -23,6 +23,7 @@ class FixState(TypedDict, total=False):
     """State of the fix subgraph for one finding."""
 
     max_revisions: int  # set by the graph from Settings
+    can_defer: bool  # a later convergence round exists to fix lint this fix introduces
 
     finding: Finding
     ctx: PRContext
